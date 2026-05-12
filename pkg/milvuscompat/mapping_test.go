@@ -61,7 +61,7 @@ var rootCoordCatalogMapping = map[string]string{
 	"CollectionExists":            "Metadata().Collections().Exists; error collapses to false for old bool API",
 	"DropCollection":              "Metadata().Collections().Drop",
 	"AlterCollection":             "Metadata().Collections().Alter",
-	"AlterCollectionDB":           "Metadata().Collections().MoveDatabase",
+	"AlterCollectionDB":           "Metadata().Collections().Alter (DBID change branch)",
 	"CreatePartition":             "Metadata().Partitions().Create",
 	"DropPartition":               "Metadata().Partitions().Drop",
 	"AlterPartition":              "Metadata().Partitions().Alter",

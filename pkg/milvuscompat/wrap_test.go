@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus-catalog/pkg/catalog"
+	"github.com/zilliztech/milvus-catalog/pkg/catalog"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -100,21 +101,21 @@ func TestWrapPartitionsListReadsCollectionPartitions(t *testing.T) {
 	require.EqualValues(t, 202, root.ts)
 }
 
-func TestWrapCollectionsMoveDatabaseDelegatesToAlterCollectionDB(t *testing.T) {
+func TestWrapCollectionsAlterRoutesDBChangeToAlterCollectionDB(t *testing.T) {
 	root := &recordingRootCatalog{}
 	c := Wrap(Catalogs{RootCoord: root})
 
-	err := c.Metadata().Collections().MoveDatabase(
+	oldColl := &model.Collection{DBID: 1, DBName: "old_db", CollectionID: 10, Name: "coll", Properties: []*commonpb.KeyValuePair{{Key: "ttl", Value: "60"}}}
+	newColl := &model.Collection{DBID: 2, DBName: "new_db", CollectionID: 10, Name: "coll", Properties: []*commonpb.KeyValuePair{{Key: "ttl", Value: "60"}}}
+
+	err := c.Metadata().Collections().Alter(
 		context.Background(),
-		catalog.CollectionRef{Database: catalog.DatabaseRef{ID: 1, Name: "old_db"}, ID: 10, Name: "coll"},
-		catalog.DatabaseRef{ID: 2, Name: "new_db"},
+		catalog.AlterCollectionRequest{Old: oldColl, New: newColl},
 		catalog.WriteOptions{Timestamp: 303},
 	)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), root.oldColl.DBID)
-	require.Equal(t, "old_db", root.oldColl.DBName)
-	require.Equal(t, int64(2), root.newColl.DBID)
-	require.Equal(t, "new_db", root.newColl.DBName)
+	require.Same(t, oldColl, root.oldColl)
+	require.Same(t, newColl, root.newColl)
 	require.EqualValues(t, 303, root.ts)
 }
 

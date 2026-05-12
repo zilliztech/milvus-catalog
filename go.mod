@@ -1,4 +1,4 @@
-module github.com/milvus-io/milvus-catalog
+module github.com/zilliztech/milvus-catalog
 
 go 1.25.9
 

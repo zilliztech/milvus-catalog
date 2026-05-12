@@ -40,7 +40,6 @@ type CollectionCatalog interface {
 	List(ctx context.Context, db DatabaseRef, opts ReadOptions) ([]*model.Collection, error)
 	Exists(ctx context.Context, ref CollectionRef, opts ReadOptions) (bool, error)
 	Alter(ctx context.Context, req AlterCollectionRequest, opts WriteOptions) error
-	MoveDatabase(ctx context.Context, source CollectionRef, target DatabaseRef, opts WriteOptions) error
 	Drop(ctx context.Context, collection *model.Collection, opts WriteOptions) error
 }
 
@@ -135,6 +134,12 @@ type Manifest struct {
 	Files        []string
 }
 
+// SnapshotCatalog covers two access shapes for collection snapshots:
+//   - Save / Drop / List delegate to the legacy DataCoord snapshot KV through
+//     the milvuscompat adapter today.
+//   - Get and ListManifests are reserved for future implementations (catalog
+//     service, TiKV native). The milvuscompat adapter returns
+//     ErrUnsupportedImplementation for those two methods by design.
 type SnapshotCatalog interface {
 	Get(ctx context.Context, req GetSnapshotRequest, opts ReadOptions) (*Snapshot, error)
 	ListManifests(ctx context.Context, req ListManifestsRequest, opts ReadOptions) ([]*Manifest, error)

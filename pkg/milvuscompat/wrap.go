@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus-catalog/pkg/catalog"
+	"github.com/zilliztech/milvus-catalog/pkg/catalog"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -58,7 +58,7 @@ func writeTS(opts catalog.WriteOptions) uint64 {
 }
 
 func missing(name string) error {
-	return fmt.Errorf("%w: %s catalog is not configured", catalog.ErrUnsupportedImplementation, name)
+	return fmt.Errorf("%w: %s catalog is not configured", catalog.ErrNotWired, name)
 }
 
 func unsupported(name string) error {
@@ -175,23 +175,21 @@ func (w wrappedCollections) Exists(ctx context.Context, ref catalog.CollectionRe
 	if w.root == nil {
 		return false, missing("rootcoord")
 	}
-	return w.root.CollectionExists(ctx, ref.Database.ID, ref.ID, readTS(opts)), nil
+	exists := w.root.CollectionExists(ctx, ref.Database.ID, ref.ID, readTS(opts))
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (w wrappedCollections) Alter(ctx context.Context, req catalog.AlterCollectionRequest, opts catalog.WriteOptions) error {
 	if w.root == nil {
 		return missing("rootcoord")
 	}
-	return w.root.AlterCollection(ctx, req.Old, req.New, req.AlterType, writeTS(opts), req.FieldModify)
-}
-
-func (w wrappedCollections) MoveDatabase(ctx context.Context, source catalog.CollectionRef, target catalog.DatabaseRef, opts catalog.WriteOptions) error {
-	if w.root == nil {
-		return missing("rootcoord")
+	if req.Old != nil && req.New != nil && req.Old.DBID != req.New.DBID {
+		return w.root.AlterCollectionDB(ctx, req.Old, req.New, writeTS(opts))
 	}
-	oldColl := &model.Collection{DBID: source.Database.ID, DBName: source.Database.Name, CollectionID: source.ID, Name: source.Name}
-	newColl := &model.Collection{DBID: target.ID, DBName: target.Name, CollectionID: source.ID, Name: source.Name}
-	return w.root.AlterCollectionDB(ctx, oldColl, newColl, writeTS(opts))
+	return w.root.AlterCollection(ctx, req.Old, req.New, req.AlterType, writeTS(opts), req.FieldModify)
 }
 
 func (w wrappedCollections) Drop(ctx context.Context, collection *model.Collection, opts catalog.WriteOptions) error {
@@ -290,18 +288,30 @@ func (w wrappedSegments) List(ctx context.Context, req catalog.ListSegmentsReque
 		return nil, missing("datacoord")
 	}
 	segments, err := w.data.ListSegments(ctx, req.CollectionID)
-	if err != nil || len(req.SegmentIDs) == 0 {
+	if err != nil {
 		return segments, err
 	}
-	ids := make(map[int64]struct{}, len(req.SegmentIDs))
-	for _, id := range req.SegmentIDs {
-		ids[id] = struct{}{}
+	if req.PartitionID == 0 && len(req.SegmentIDs) == 0 {
+		return segments, nil
 	}
-	filtered := make([]*datapb.SegmentInfo, 0, len(req.SegmentIDs))
-	for _, segment := range segments {
-		if _, ok := ids[segment.GetID()]; ok {
-			filtered = append(filtered, segment)
+	var ids map[int64]struct{}
+	if len(req.SegmentIDs) > 0 {
+		ids = make(map[int64]struct{}, len(req.SegmentIDs))
+		for _, id := range req.SegmentIDs {
+			ids[id] = struct{}{}
 		}
+	}
+	filtered := make([]*datapb.SegmentInfo, 0, len(segments))
+	for _, segment := range segments {
+		if req.PartitionID != 0 && segment.GetPartitionID() != req.PartitionID {
+			continue
+		}
+		if ids != nil {
+			if _, ok := ids[segment.GetID()]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, segment)
 	}
 	return filtered, nil
 }
@@ -705,14 +715,22 @@ func (w wrappedDataState) ShouldDropChannel(ctx context.Context, channel string,
 	if w.data == nil {
 		return false, missing("datacoord")
 	}
-	return w.data.ShouldDropChannel(ctx, channel), nil
+	result := w.data.ShouldDropChannel(ctx, channel)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return result, nil
 }
 
 func (w wrappedDataState) ChannelExists(ctx context.Context, channel string, opts catalog.ReadOptions) (bool, error) {
 	if w.data == nil {
 		return false, missing("datacoord")
 	}
-	return w.data.ChannelExists(ctx, channel), nil
+	result := w.data.ChannelExists(ctx, channel)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return result, nil
 }
 
 func (w wrappedDataState) DropChannel(ctx context.Context, channel string, opts catalog.WriteOptions) error {
@@ -838,7 +856,11 @@ func (w wrappedDataState) GcConfirm(ctx context.Context, collectionID int64, par
 	if w.data == nil {
 		return false, missing("datacoord")
 	}
-	return w.data.GcConfirm(ctx, collectionID, partitionID), nil
+	result := w.data.GcConfirm(ctx, collectionID, partitionID)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return result, nil
 }
 
 func (w wrappedDataState) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask, opts catalog.WriteOptions) error {

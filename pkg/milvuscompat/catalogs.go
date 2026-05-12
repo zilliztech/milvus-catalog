@@ -3,7 +3,7 @@ package milvuscompat
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-catalog/pkg/catalog"
+	"github.com/zilliztech/milvus-catalog/pkg/catalog"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -55,6 +55,14 @@ func wo(ts typeutil.Timestamp) catalog.WriteOptions {
 	return catalog.WriteOptions{Timestamp: ts}
 }
 
+// collapseBool maps the canonical (bool, error) catalog API to a legacy bool
+// return. Errors silently become false because the legacy interface has no
+// error channel. Callers that need to distinguish "definitively false" from
+// "backend unavailable" must migrate to the (bool, error) API directly.
+func collapseBool(result bool, err error) bool {
+	return err == nil && result
+}
+
 func (r rootCoordCatalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	return r.c.Metadata().Databases().Create(ctx, db, wo(ts))
 }
@@ -88,8 +96,7 @@ func (r rootCoordCatalog) ListCollections(ctx context.Context, dbID int64, ts ty
 }
 
 func (r rootCoordCatalog) CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {
-	exists, err := r.c.Metadata().Collections().Exists(ctx, catalog.CollectionRef{Database: catalog.DatabaseRef{ID: dbID}, ID: collectionID}, ro(ts))
-	return err == nil && exists
+	return collapseBool(r.c.Metadata().Collections().Exists(ctx, catalog.CollectionRef{Database: catalog.DatabaseRef{ID: dbID}, ID: collectionID}, ro(ts)))
 }
 
 func (r rootCoordCatalog) DropCollection(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
@@ -106,12 +113,11 @@ func (r rootCoordCatalog) AlterCollection(ctx context.Context, oldColl *model.Co
 }
 
 func (r rootCoordCatalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
-	return r.c.Metadata().Collections().MoveDatabase(
-		ctx,
-		catalog.CollectionRef{Database: catalog.DatabaseRef{ID: oldColl.DBID, Name: oldColl.DBName}, ID: oldColl.CollectionID, Name: oldColl.Name},
-		catalog.DatabaseRef{ID: newColl.DBID, Name: newColl.DBName},
-		wo(ts),
-	)
+	return r.c.Metadata().Collections().Alter(ctx, catalog.AlterCollectionRequest{
+		Old:       oldColl,
+		New:       newColl,
+		AlterType: metastore.MODIFY,
+	}, wo(ts))
 }
 
 func (r rootCoordCatalog) CreatePartition(ctx context.Context, dbID int64, partition *model.Partition, ts typeutil.Timestamp) error {
@@ -279,13 +285,11 @@ func (d dataCoordCatalog) MarkChannelDeleted(ctx context.Context, channel string
 }
 
 func (d dataCoordCatalog) ShouldDropChannel(ctx context.Context, channel string) bool {
-	shouldDrop, err := d.c.InternalState().DataCoord().ShouldDropChannel(ctx, channel, catalog.ReadOptions{})
-	return err == nil && shouldDrop
+	return collapseBool(d.c.InternalState().DataCoord().ShouldDropChannel(ctx, channel, catalog.ReadOptions{}))
 }
 
 func (d dataCoordCatalog) ChannelExists(ctx context.Context, channel string) bool {
-	exists, err := d.c.InternalState().DataCoord().ChannelExists(ctx, channel, catalog.ReadOptions{})
-	return err == nil && exists
+	return collapseBool(d.c.InternalState().DataCoord().ChannelExists(ctx, channel, catalog.ReadOptions{}))
 }
 
 func (d dataCoordCatalog) DropChannel(ctx context.Context, channel string) error {
@@ -405,8 +409,7 @@ func (d dataCoordCatalog) DropCopySegmentTask(ctx context.Context, taskID int64)
 }
 
 func (d dataCoordCatalog) GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool {
-	confirmed, err := d.c.InternalState().DataCoord().GcConfirm(ctx, collectionID, partitionID, catalog.ReadOptions{})
-	return err == nil && confirmed
+	return collapseBool(d.c.InternalState().DataCoord().GcConfirm(ctx, collectionID, partitionID, catalog.ReadOptions{}))
 }
 
 func (d dataCoordCatalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
