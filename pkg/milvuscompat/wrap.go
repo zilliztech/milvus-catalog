@@ -1160,8 +1160,8 @@ func (w wrappedQueryState) GetCollectionTargets(ctx context.Context, opts catalo
 }
 
 type wrappedStreamingState struct {
-	streamingCoord metastore.StreamingCoordCataLog
-	streamingNode  metastore.StreamingNodeCataLog
+	streamingCoord metastore.StreamingCoordCatalog
+	streamingNode  metastore.StreamingNodeCatalog
 }
 
 func (w wrappedStreamingState) GetCChannel(ctx context.Context, opts catalog.ReadOptions) (*streamingpb.CChannelMeta, error) {

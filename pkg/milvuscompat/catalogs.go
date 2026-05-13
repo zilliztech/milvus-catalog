@@ -21,8 +21,8 @@ type Catalogs struct {
 	RootCoord      metastore.RootCoordCatalog
 	DataCoord      metastore.DataCoordCatalog
 	QueryCoord     metastore.QueryCoordCatalog
-	StreamingCoord metastore.StreamingCoordCataLog
-	StreamingNode  metastore.StreamingNodeCataLog
+	StreamingCoord metastore.StreamingCoordCatalog
+	StreamingNode  metastore.StreamingNodeCatalog
 }
 
 func New(c catalog.Catalog) Catalogs {
@@ -44,8 +44,8 @@ type streamingNodeCatalog struct{ c catalog.Catalog }
 var _ metastore.RootCoordCatalog = rootCoordCatalog{}
 var _ metastore.DataCoordCatalog = dataCoordCatalog{}
 var _ metastore.QueryCoordCatalog = queryCoordCatalog{}
-var _ metastore.StreamingCoordCataLog = streamingCoordCatalog{}
-var _ metastore.StreamingNodeCataLog = streamingNodeCatalog{}
+var _ metastore.StreamingCoordCatalog = streamingCoordCatalog{}
+var _ metastore.StreamingNodeCatalog = streamingNodeCatalog{}
 
 func ro(ts typeutil.Timestamp) catalog.ReadOptions {
 	return catalog.ReadOptions{At: ts}

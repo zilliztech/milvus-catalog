@@ -18,8 +18,8 @@ func TestMilvusCatalogMappingDocumentsEveryMethod(t *testing.T) {
 		{name: "RootCoordCatalog", iface: reflect.TypeOf((*metastore.RootCoordCatalog)(nil)).Elem(), mapping: rootCoordCatalogMapping},
 		{name: "DataCoordCatalog", iface: reflect.TypeOf((*metastore.DataCoordCatalog)(nil)).Elem(), mapping: dataCoordCatalogMapping},
 		{name: "QueryCoordCatalog", iface: reflect.TypeOf((*metastore.QueryCoordCatalog)(nil)).Elem(), mapping: queryCoordCatalogMapping},
-		{name: "StreamingCoordCataLog", iface: reflect.TypeOf((*metastore.StreamingCoordCataLog)(nil)).Elem(), mapping: streamingCoordCatalogMapping},
-		{name: "StreamingNodeCataLog", iface: reflect.TypeOf((*metastore.StreamingNodeCataLog)(nil)).Elem(), mapping: streamingNodeCatalogMapping},
+		{name: "StreamingCoordCatalog", iface: reflect.TypeOf((*metastore.StreamingCoordCatalog)(nil)).Elem(), mapping: streamingCoordCatalogMapping},
+		{name: "StreamingNodeCatalog", iface: reflect.TypeOf((*metastore.StreamingNodeCatalog)(nil)).Elem(), mapping: streamingNodeCatalogMapping},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			methods := make(map[string]struct{}, tc.iface.NumMethod())
