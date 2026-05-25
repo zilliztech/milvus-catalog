@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zilliztech/milvus-catalog/pkg/catalog"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/zilliztech/milvus-catalog/pkg/catalog"
 )
 
 type captureRoot struct {

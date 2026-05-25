@@ -3,7 +3,6 @@ package milvuscompat
 import (
 	"context"
 
-	"github.com/zilliztech/milvus-catalog/pkg/catalog"
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -15,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/zilliztech/milvus-catalog/pkg/catalog"
 )
 
 type Catalogs struct {
