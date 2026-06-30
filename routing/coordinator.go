@@ -6,6 +6,9 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v3/log"
 )
 
 // Coordinator is a catalog-service node's control-plane agent. It joins the pooled etcd
@@ -21,8 +24,9 @@ type Coordinator struct {
 	ttl    int64
 	tick   time.Duration
 
-	membership  *Membership
-	leaseWindow time.Duration // serve only if the lease was renewed within this window
+	membership       *Membership
+	leaseWindow      time.Duration // serve only if the lease was renewed within this window
+	reconcileTimeout time.Duration // bound each reconcile iteration so one hung etcd call can't stall it
 
 	mu        sync.Mutex
 	owned     map[int]int64    // shard -> term (claim ModRevision)
@@ -38,10 +42,11 @@ type Coordinator struct {
 func NewCoordinator(cli *clientv3.Client, prefix, nodeID string, ttlSeconds int64, tick time.Duration) *Coordinator {
 	return &Coordinator{
 		cli: cli, prefix: prefix, nodeID: nodeID, ttl: ttlSeconds, tick: tick,
-		leaseWindow: time.Duration(ttlSeconds) * time.Second / 2,
-		owned:       make(map[int]int64),
-		releasing:   make(map[int]struct{}),
-		done:        make(chan struct{}),
+		leaseWindow:      time.Duration(ttlSeconds) * time.Second / 2,
+		reconcileTimeout: time.Duration(ttlSeconds) * time.Second, // a reconcile call that outlives the lease is already pathological
+		owned:            make(map[int]int64),
+		releasing:        make(map[int]struct{}),
+		done:             make(chan struct{}),
 	}
 }
 
@@ -68,6 +73,12 @@ func (c *Coordinator) loop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-c.membership.Lost():
+			// The lease was lost and could not be re-established: stop reconciling (claiming with
+			// a dead lease only fails) and let Fatal() surface to the supervisor for a restart,
+			// instead of spinning forever as a zombie that owns and serves nothing.
+			log.Ctx(ctx).Error("catalog reconcile: membership lease lost, stopping reconcile loop", zap.String("node", c.nodeID))
+			return
 		case <-t.C:
 			c.reconcileOnce(ctx)
 		}
@@ -75,27 +86,40 @@ func (c *Coordinator) loop(ctx context.Context) {
 }
 
 func (c *Coordinator) reconcileOnce(ctx context.Context) {
-	members, err := ListMembers(ctx, c.cli, c.prefix)
+	// Bound the whole iteration: a single etcd call that hangs must not stall all future
+	// reconciliation, and every swallowed error below is now logged so persistent divergence is
+	// operator-visible instead of silent.
+	cctx, cancel := context.WithTimeout(ctx, c.reconcileTimeout)
+	defer cancel()
+
+	members, err := ListMembers(cctx, c.cli, c.prefix)
 	if err != nil {
+		log.Ctx(ctx).Warn("catalog reconcile: list members failed", zap.String("node", c.nodeID), zap.Error(err))
 		return
 	}
-	sm, err := LoadShardMap(ctx, c.cli, c.prefix)
+	sm, err := LoadShardMap(cctx, c.cli, c.prefix)
 	if err != nil {
+		log.Ctx(ctx).Warn("catalog reconcile: load shard map failed", zap.String("node", c.nodeID), zap.Error(err))
 		return
 	}
 	claim, release := Reconcile(c.nodeID, members, sm)
 	for _, s := range claim {
-		_, _, _ = ClaimShard(ctx, c.cli, c.prefix, s, c.nodeID, c.membership.LeaseID())
+		if _, _, err := ClaimShard(cctx, c.cli, c.prefix, s, c.nodeID, c.membership.LeaseID()); err != nil {
+			log.Ctx(ctx).Warn("catalog reconcile: claim shard failed", zap.String("node", c.nodeID), zap.Int("shard", s), zap.Error(err))
+		}
 	}
 	for _, s := range release {
 		// graceful handoff: stop serving new requests for the shard, then release the key.
 		c.MarkReleasing(s)
-		_ = ReleaseShard(ctx, c.cli, c.prefix, s, c.nodeID)
+		if err := ReleaseShard(cctx, c.cli, c.prefix, s, c.nodeID); err != nil {
+			log.Ctx(ctx).Warn("catalog reconcile: release shard failed", zap.String("node", c.nodeID), zap.Int("shard", s), zap.Error(err))
+		}
 	}
 
 	// refresh the authoritative owned view (with terms) from etcd.
-	om, err := LoadOwnershipMap(ctx, c.cli, c.prefix)
+	om, err := LoadOwnershipMap(cctx, c.cli, c.prefix)
 	if err != nil {
+		log.Ctx(ctx).Warn("catalog reconcile: load ownership map failed", zap.String("node", c.nodeID), zap.Error(err))
 		return
 	}
 	owned := make(map[int]int64)
@@ -117,6 +141,13 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 	c.owned = owned
 	c.releasing = releasing
 	c.mu.Unlock()
+}
+
+// Fatal returns a channel closed when the membership lease is irrecoverably lost (etcd dropped
+// it after a partition longer than the TTL). The node can no longer serve or claim anything, so
+// the owner should treat this as fatal and restart the process. Call after Start.
+func (c *Coordinator) Fatal() <-chan struct{} {
+	return c.membership.Lost()
 }
 
 // OwnedShards returns the shards this node currently owns (last reconcile's etcd view).

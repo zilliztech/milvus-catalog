@@ -77,7 +77,9 @@ exposed to clients.
 ### Routing
 
 Goals: sticky, highly available, consistent, scalable, balanced. Reuses etcd's liveness mechanism;
-catalog ↔ etcd are protected by mutual mTLS.
+catalog ↔ etcd are protected by mutual mTLS. The coord ↔ catalog data plane — which carries the
+credential and RBAC RPCs — dials insecure by default for experimental use; pass TLS credentials
+via `Router.WithCredentials` (or terminate TLS in a sidecar) before production.
 
 1. **Membership**: a node writes `/members/{node-id}` under a lease on startup. When it dies, its
    member entry and the ownership records it holds evaporate automatically.
@@ -92,9 +94,10 @@ catalog ↔ etcd are protected by mutual mTLS.
       actual == me    and suggested != me -> release list
       actual == empty and suggested == me -> claim list
    ```
-3. **Release (graceful)**: mark each released shard, return NOT OWNER for new requests, wait for
-   in-flight requests to drain, then conditionally delete `/ownership/shard/{s}` in etcd and drop
-   that shard's cache and lock.
+3. **Release**: mark each released shard so new requests get NOT OWNER, then conditionally delete
+   `/ownership/shard/{s}` in etcd and drop that shard's cache and lock. New requests are fenced
+   immediately; draining already-admitted in-flight requests is not yet done — it needs an
+   in-flight count on the service request path (TODO before this leaves experimental).
 4. **Claim**: claim from the claim list until reaching fair share; etcd arbitrates. On success the
    ownership key's modRevision (the "term") increases; the new owner stamps that term on writes to
    fence a stale old owner. Pass-through channels serve immediately; business channels reload then
@@ -102,7 +105,7 @@ catalog ↔ etcd are protected by mutual mTLS.
 5. **Discovery**: a client fetches the route map from any node on startup; on NOT OWNER / timeout it
    takes one extra hop to fetch the latest route map and redirects.
 6. **Membership changes**: placement re-converges, discovery follows. Crash → lease TTL expiry →
-   others recompute → clients re-pull. Restart / scale-out → stop new requests, drain, delete own
+   others recompute → clients re-pull. Restart / scale-out → stop new requests, delete own
    keys (no TTL wait). Cold start → each node registers + claims; one placement loop assigns routing.
 7. **Shards**: control plane fixed at 256; ownership keys do not change when namespaces are
    added/removed; scaling only moves `1/N · shard_count`.

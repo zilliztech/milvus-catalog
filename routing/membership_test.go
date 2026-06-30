@@ -74,3 +74,42 @@ func TestMembershipCrashExpiry(t *testing.T) {
 		return len(ms) == 0
 	}, 8*time.Second, 250*time.Millisecond, "member must evaporate after lease TTL on crash")
 }
+
+// Lease lost out from under the node (here: revoked externally, as a partition-beyond-TTL would
+// do) -> Lost() fires, so the node can surface a fatal error and be restarted instead of becoming
+// a permanent zombie that neither serves nor claims.
+func TestMembershipLostFiresWhenLeaseRevoked(t *testing.T) {
+	cli := testEtcdClient(t)
+	prefix := freshPrefix(t, cli, "catalog-test/memb-lost")
+	ctx := context.Background()
+
+	m, err := JoinMembership(ctx, cli, prefix, "node-1", 2)
+	require.NoError(t, err)
+
+	_, err = cli.Revoke(context.Background(), m.LeaseID()) // etcd then closes the keepalive channel
+	require.NoError(t, err)
+
+	select {
+	case <-m.Lost():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Lost() must fire once the lease is gone")
+	}
+}
+
+// A deliberate Close must NOT be reported as a lost lease — otherwise a graceful shutdown would
+// trip the supervisor's restart path.
+func TestMembershipCloseDoesNotSignalLost(t *testing.T) {
+	cli := testEtcdClient(t)
+	prefix := freshPrefix(t, cli, "catalog-test/memb-close-nolost")
+	ctx := context.Background()
+
+	m, err := JoinMembership(ctx, cli, prefix, "node-1", 3)
+	require.NoError(t, err)
+	m.Close()
+
+	select {
+	case <-m.Lost():
+		t.Fatal("a deliberate Close must not be reported as a lost lease")
+	case <-time.After(1 * time.Second):
+	}
+}

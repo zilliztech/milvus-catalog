@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
@@ -23,6 +24,7 @@ import (
 // response re-fetches the route map and redirects — making failover transparent to the caller.
 type Router struct {
 	bootstrap []string
+	creds     credentials.TransportCredentials // how to dial catalog nodes; insecure by default
 
 	mu         sync.Mutex
 	shardOwner map[int]string // shard -> owner address (node id == gRPC address)
@@ -30,9 +32,24 @@ type Router struct {
 	conns      map[string]*grpc.ClientConn
 }
 
-// NewRouter creates a discovery router seeded with one or more catalog node addresses.
+// NewRouter creates a discovery router seeded with one or more catalog node addresses. It dials
+// catalog nodes insecurely by default; call WithCredentials to enable TLS/mTLS on the data plane
+// (which carries credential and RBAC RPCs) before this leaves an experimental deployment.
 func NewRouter(bootstrap ...string) *Router {
-	return &Router{bootstrap: bootstrap, shardOwner: map[int]string{}, shardTerm: map[int]int64{}, conns: map[string]*grpc.ClientConn{}}
+	return &Router{
+		bootstrap:  bootstrap,
+		creds:      insecure.NewCredentials(),
+		shardOwner: map[int]string{},
+		shardTerm:  map[int]int64{},
+		conns:      map[string]*grpc.ClientConn{},
+	}
+}
+
+// WithCredentials sets the transport credentials used to dial catalog nodes (e.g. mTLS), so the
+// coord→catalog data plane is not forced to plaintext. Call before the first request.
+func (r *Router) WithCredentials(creds credentials.TransportCredentials) *Router {
+	r.creds = creds
+	return r
 }
 
 // Close shuts all pooled connections.
@@ -45,13 +62,32 @@ func (r *Router) Close() {
 	r.conns = map[string]*grpc.ClientConn{}
 }
 
+// evictStaleConnsLocked closes and drops pooled connections to addresses that are neither a
+// current shard owner nor a bootstrap node, so the pool tracks only live owners instead of
+// growing one dangling connection per departed owner under membership churn. Caller holds r.mu.
+func (r *Router) evictStaleConnsLocked(owner map[int]string) {
+	live := make(map[string]struct{}, len(owner)+len(r.bootstrap))
+	for _, a := range owner {
+		live[a] = struct{}{}
+	}
+	for _, a := range r.bootstrap {
+		live[a] = struct{}{}
+	}
+	for addr, c := range r.conns {
+		if _, ok := live[addr]; !ok {
+			_ = c.Close()
+			delete(r.conns, addr)
+		}
+	}
+}
+
 func (r *Router) conn(addr string) (*grpc.ClientConn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c, ok := r.conns[addr]; ok {
 		return c, nil
 	}
-	c, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	c, err := grpc.NewClient(addr, grpc.WithTransportCredentials(r.creds))
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +131,7 @@ func (r *Router) Refresh(ctx context.Context) error {
 		r.mu.Lock()
 		r.shardOwner = owner
 		r.shardTerm = term
+		r.evictStaleConnsLocked(owner)
 		r.mu.Unlock()
 		return nil
 	}
@@ -125,12 +162,27 @@ func (r *Router) routeFor(namespace string) (owner string, term int64) {
 
 // Do runs fn against the catalog node that owns namespace, stamping the namespace on the
 // context. On a not-owner / unavailable error it re-fetches the route map and retries at the
-// (possibly new) owner — transparently surviving failover and ownership moves.
+// (possibly new) owner — transparently surviving failover and ownership moves. Use this for
+// idempotent calls only; for calls whose re-send could double-apply, use DoNonIdempotent.
 //
 // The (owner, term) pair is read atomically via routeFor, but conn() and fn() then run without
 // the lock; a concurrent Refresh between routeFor and fn can send a new-term request to the old
 // owner, which the server fences as a retriable error — self-corrected on the next attempt.
 func (r *Router) Do(ctx context.Context, namespace string, fn func(ctx context.Context, c catalogpb.CatalogServiceClient) error) error {
+	return r.do(ctx, namespace, fn, true)
+}
+
+// DoNonIdempotent is Do for calls that must not be blindly re-sent on an ambiguous transport
+// failure (mid-flight Unavailable / DeadlineExceeded): the first attempt may already have been
+// applied server-side, so re-sending a delta (e.g. a ref-count increment/decrement) would
+// double-apply it. It still redirects on an explicit not-owner response — the server rejected
+// the call before applying it, so retrying at the new owner is safe — but surfaces an ambiguous
+// transport error to the caller instead of retrying.
+func (r *Router) DoNonIdempotent(ctx context.Context, namespace string, fn func(ctx context.Context, c catalogpb.CatalogServiceClient) error) error {
+	return r.do(ctx, namespace, fn, false)
+}
+
+func (r *Router) do(ctx context.Context, namespace string, fn func(ctx context.Context, c catalogpb.CatalogServiceClient) error, retryAmbiguous bool) error {
 	const maxAttempts = 4
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -159,22 +211,30 @@ func (r *Router) Do(ctx context.Context, namespace string, fn func(ctx context.C
 		if err == nil {
 			return nil
 		}
-		if shouldRedirect(err) {
+		// A retriable rejection (not-owner / not-ready / rate-limited) is refused before the call
+		// is applied, so redirecting is always safe. An ambiguous transport failure may have been
+		// applied already, so we only retry it when the caller marked the call idempotent.
+		if isRetriableRejection(err) || (retryAmbiguous && isAmbiguousTransport(err)) {
 			lastErr = err
 			_ = r.Refresh(ctx)
 			continue
 		}
-		return err // genuine business error: surface it
+		return err // genuine business error, or an ambiguous failure we must not blindly retry
 	}
 	return lastErr
 }
 
-// shouldRedirect reports whether an error means "try the route map again at a different
-// owner" — a retriable not-owner response, or a gRPC transport failure (dead node).
-func shouldRedirect(err error) bool {
-	if merr.IsRetryableErr(err) {
-		return true
-	}
+// isRetriableRejection reports whether the server refused the call with a retriable status —
+// not-owner, not-ready, rate-limited and the like. Milvus's merr convention marks retriable=true
+// only for rejections made before the call is applied, so redirecting and retrying is always
+// safe (the not-owner case is what drives failover here).
+func isRetriableRejection(err error) bool {
+	return merr.IsRetryableErr(err)
+}
+
+// isAmbiguousTransport reports whether err is a gRPC transport failure that leaves the call's
+// outcome unknown — the request may or may not have reached and been applied by the server.
+func isAmbiguousTransport(err error) bool {
 	switch status.Code(err) {
 	case codes.Unavailable, codes.DeadlineExceeded:
 		return true

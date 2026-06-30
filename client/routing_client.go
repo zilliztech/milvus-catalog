@@ -5,8 +5,21 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/catalogpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// callErr reduces a wrapped call to the error Router.Do should act on: the transport error if
+// the RPC itself failed, otherwise the business error carried in the response Status. Milvus
+// returns not-owner / fencing failures inside Status with a nil gRPC error, so without this a
+// not-owner response would look like success to Router.Do and the redirect would never fire.
+func callErr(transport error, st *commonpb.Status) error {
+	if transport != nil {
+		return transport
+	}
+	return merr.Error(st)
+}
 
 // routingClient is a catalogpb.CatalogServiceClient bound to one namespace that sends every
 // call through the Router: it resolves the namespace's owner, dials it, and on a not-owner /
@@ -29,7 +42,7 @@ func (rc *routingClient) CreateDatabase(ctx context.Context, in *catalogpb.Creat
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CreateDatabase(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -39,7 +52,7 @@ func (rc *routingClient) DropDatabase(ctx context.Context, in *catalogpb.DropDat
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropDatabase(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -49,7 +62,7 @@ func (rc *routingClient) AlterDatabase(ctx context.Context, in *catalogpb.AlterD
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AlterDatabase(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -59,7 +72,7 @@ func (rc *routingClient) ListDatabases(ctx context.Context, in *catalogpb.ListDa
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListDatabases(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -69,7 +82,7 @@ func (rc *routingClient) GetDatabaseByName(ctx context.Context, in *catalogpb.Ge
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetDatabaseByName(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -79,7 +92,7 @@ func (rc *routingClient) GetDatabaseByID(ctx context.Context, in *catalogpb.GetD
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetDatabaseByID(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -89,7 +102,7 @@ func (rc *routingClient) AddCollection(ctx context.Context, in *catalogpb.AddCol
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AddCollection(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -99,7 +112,7 @@ func (rc *routingClient) DropCollection(ctx context.Context, in *catalogpb.DropC
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropCollection(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -109,7 +122,7 @@ func (rc *routingClient) RemoveCollection(ctx context.Context, in *catalogpb.Rem
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.RemoveCollection(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -119,7 +132,7 @@ func (rc *routingClient) GetCollectionID(ctx context.Context, in *catalogpb.GetC
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetCollectionID(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -129,7 +142,7 @@ func (rc *routingClient) GetCollectionByName(ctx context.Context, in *catalogpb.
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetCollectionByName(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -139,7 +152,7 @@ func (rc *routingClient) GetCollectionByID(ctx context.Context, in *catalogpb.Ge
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetCollectionByID(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -149,7 +162,7 @@ func (rc *routingClient) GetCollectionByIDWithMaxTs(ctx context.Context, in *cat
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetCollectionByIDWithMaxTs(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -159,7 +172,7 @@ func (rc *routingClient) ListCollections(ctx context.Context, in *catalogpb.List
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListCollections(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -169,7 +182,7 @@ func (rc *routingClient) ListAllAvailCollections(ctx context.Context, in *catalo
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListAllAvailCollections(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -179,7 +192,7 @@ func (rc *routingClient) ListAllAvailPartitions(ctx context.Context, in *catalog
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListAllAvailPartitions(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -189,7 +202,7 @@ func (rc *routingClient) ListCollectionPhysicalChannels(ctx context.Context, in 
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListCollectionPhysicalChannels(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -199,7 +212,7 @@ func (rc *routingClient) GetCollectionVirtualChannels(ctx context.Context, in *c
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetCollectionVirtualChannels(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -209,7 +222,7 @@ func (rc *routingClient) GetPChannelInfo(ctx context.Context, in *catalogpb.GetP
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetPChannelInfo(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -219,7 +232,7 @@ func (rc *routingClient) CheckIfCollectionRenamable(ctx context.Context, in *cat
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfCollectionRenamable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -229,7 +242,7 @@ func (rc *routingClient) BeginTruncateCollection(ctx context.Context, in *catalo
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.BeginTruncateCollection(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -239,7 +252,7 @@ func (rc *routingClient) GetGeneralCount(ctx context.Context, in *catalogpb.GetG
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetGeneralCount(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -249,7 +262,7 @@ func (rc *routingClient) AlterCollection(ctx context.Context, in *catalogpb.Alte
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AlterCollection(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -259,7 +272,7 @@ func (rc *routingClient) TruncateCollection(ctx context.Context, in *catalogpb.T
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.TruncateCollection(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -269,7 +282,7 @@ func (rc *routingClient) AddPartition(ctx context.Context, in *catalogpb.AddPart
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AddPartition(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -279,7 +292,7 @@ func (rc *routingClient) GetPartitionIDByName(ctx context.Context, in *catalogpb
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetPartitionIDByName(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -289,7 +302,7 @@ func (rc *routingClient) DropPartition(ctx context.Context, in *catalogpb.DropPa
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropPartition(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -299,7 +312,7 @@ func (rc *routingClient) RemovePartition(ctx context.Context, in *catalogpb.Remo
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.RemovePartition(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -309,7 +322,7 @@ func (rc *routingClient) AlterAlias(ctx context.Context, in *catalogpb.AlterAlia
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AlterAlias(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -319,7 +332,7 @@ func (rc *routingClient) DropAlias(ctx context.Context, in *catalogpb.DropAliasR
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropAlias(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -329,7 +342,7 @@ func (rc *routingClient) DescribeAlias(ctx context.Context, in *catalogpb.Descri
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DescribeAlias(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -339,7 +352,7 @@ func (rc *routingClient) ListAliases(ctx context.Context, in *catalogpb.ListAlia
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListAliases(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -349,7 +362,7 @@ func (rc *routingClient) IsAlias(ctx context.Context, in *catalogpb.IsAliasReque
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.IsAlias(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -359,7 +372,7 @@ func (rc *routingClient) ListAliasesByID(ctx context.Context, in *catalogpb.List
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListAliasesByID(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -369,7 +382,7 @@ func (rc *routingClient) CheckIfAliasCreatable(ctx context.Context, in *catalogp
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfAliasCreatable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -379,7 +392,7 @@ func (rc *routingClient) CheckIfAliasAlterable(ctx context.Context, in *catalogp
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfAliasAlterable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -389,7 +402,7 @@ func (rc *routingClient) CheckIfAliasDroppable(ctx context.Context, in *catalogp
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfAliasDroppable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -399,7 +412,7 @@ func (rc *routingClient) InitCredential(ctx context.Context, in *catalogpb.InitC
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.InitCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -409,7 +422,7 @@ func (rc *routingClient) AlterCredential(ctx context.Context, in *catalogpb.Alte
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AlterCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -419,7 +432,7 @@ func (rc *routingClient) DeleteCredential(ctx context.Context, in *catalogpb.Del
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DeleteCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -429,7 +442,7 @@ func (rc *routingClient) GetCredential(ctx context.Context, in *catalogpb.GetCre
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -439,7 +452,7 @@ func (rc *routingClient) ListCredentialUsernames(ctx context.Context, in *catalo
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListCredentialUsernames(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -449,7 +462,7 @@ func (rc *routingClient) CheckIfAddCredential(ctx context.Context, in *catalogpb
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfAddCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -459,7 +472,7 @@ func (rc *routingClient) CheckIfUpdateCredential(ctx context.Context, in *catalo
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfUpdateCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -469,7 +482,7 @@ func (rc *routingClient) CheckIfDeleteCredential(ctx context.Context, in *catalo
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfDeleteCredential(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -479,7 +492,7 @@ func (rc *routingClient) CreateRole(ctx context.Context, in *catalogpb.CreateRol
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CreateRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -489,7 +502,7 @@ func (rc *routingClient) AlterRole(ctx context.Context, in *catalogpb.AlterRoleR
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AlterRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -499,7 +512,7 @@ func (rc *routingClient) DropRole(ctx context.Context, in *catalogpb.DropRoleReq
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -509,7 +522,7 @@ func (rc *routingClient) OperateUserRole(ctx context.Context, in *catalogpb.Oper
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.OperateUserRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -519,7 +532,7 @@ func (rc *routingClient) SelectRole(ctx context.Context, in *catalogpb.SelectRol
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.SelectRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -529,7 +542,7 @@ func (rc *routingClient) SelectUser(ctx context.Context, in *catalogpb.SelectUse
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.SelectUser(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -539,7 +552,7 @@ func (rc *routingClient) ListUserRole(ctx context.Context, in *catalogpb.ListUse
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListUserRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -549,7 +562,7 @@ func (rc *routingClient) CheckIfCreateRole(ctx context.Context, in *catalogpb.Ch
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfCreateRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -559,7 +572,7 @@ func (rc *routingClient) CheckIfAlterRole(ctx context.Context, in *catalogpb.Che
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfAlterRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -569,7 +582,7 @@ func (rc *routingClient) CheckIfDropRole(ctx context.Context, in *catalogpb.Chec
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfDropRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -579,7 +592,7 @@ func (rc *routingClient) CheckIfOperateUserRole(ctx context.Context, in *catalog
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfOperateUserRole(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -589,7 +602,7 @@ func (rc *routingClient) OperatePrivilege(ctx context.Context, in *catalogpb.Ope
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.OperatePrivilege(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -599,7 +612,7 @@ func (rc *routingClient) DropGrant(ctx context.Context, in *catalogpb.DropGrantR
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropGrant(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -609,7 +622,7 @@ func (rc *routingClient) RestoreRBAC(ctx context.Context, in *catalogpb.RestoreR
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.RestoreRBAC(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -619,7 +632,7 @@ func (rc *routingClient) SelectGrant(ctx context.Context, in *catalogpb.SelectGr
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.SelectGrant(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -629,7 +642,7 @@ func (rc *routingClient) ListPolicy(ctx context.Context, in *catalogpb.ListPolic
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListPolicy(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -639,7 +652,7 @@ func (rc *routingClient) BackupRBAC(ctx context.Context, in *catalogpb.BackupRBA
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.BackupRBAC(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -649,7 +662,7 @@ func (rc *routingClient) CheckIfRBACRestorable(ctx context.Context, in *catalogp
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfRBACRestorable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -659,7 +672,7 @@ func (rc *routingClient) CreatePrivilegeGroup(ctx context.Context, in *catalogpb
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CreatePrivilegeGroup(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -669,7 +682,7 @@ func (rc *routingClient) DropPrivilegeGroup(ctx context.Context, in *catalogpb.D
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DropPrivilegeGroup(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -679,7 +692,7 @@ func (rc *routingClient) OperatePrivilegeGroup(ctx context.Context, in *catalogp
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.OperatePrivilegeGroup(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -689,7 +702,7 @@ func (rc *routingClient) IsCustomPrivilegeGroup(ctx context.Context, in *catalog
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.IsCustomPrivilegeGroup(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -699,7 +712,7 @@ func (rc *routingClient) ListPrivilegeGroups(ctx context.Context, in *catalogpb.
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListPrivilegeGroups(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -709,7 +722,7 @@ func (rc *routingClient) GetPrivilegeGroupRoles(ctx context.Context, in *catalog
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetPrivilegeGroupRoles(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -719,7 +732,7 @@ func (rc *routingClient) CheckIfPrivilegeGroupCreatable(ctx context.Context, in 
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfPrivilegeGroupCreatable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -729,7 +742,7 @@ func (rc *routingClient) CheckIfPrivilegeGroupAlterable(ctx context.Context, in 
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfPrivilegeGroupAlterable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -739,7 +752,7 @@ func (rc *routingClient) CheckIfPrivilegeGroupDropable(ctx context.Context, in *
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfPrivilegeGroupDropable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -749,7 +762,7 @@ func (rc *routingClient) CheckIfDatabaseCreatable(ctx context.Context, in *catal
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfDatabaseCreatable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -759,7 +772,7 @@ func (rc *routingClient) CheckIfDatabaseDroppable(ctx context.Context, in *catal
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.CheckIfDatabaseDroppable(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -769,7 +782,7 @@ func (rc *routingClient) AddFileResource(ctx context.Context, in *catalogpb.AddF
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.AddFileResource(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -779,7 +792,7 @@ func (rc *routingClient) RemoveFileResource(ctx context.Context, in *catalogpb.R
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.RemoveFileResource(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -789,27 +802,33 @@ func (rc *routingClient) ListFileResource(ctx context.Context, in *catalogpb.Lis
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.ListFileResource(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
 
+// IncFileResourceRefCnt applies a +1 ref-count delta, so a blind re-send on an ambiguous
+// transport failure would double-increment — routed through DoNonIdempotent, which redirects on
+// not-owner but does not auto-retry ambiguous transport errors.
 func (rc *routingClient) IncFileResourceRefCnt(ctx context.Context, in *catalogpb.IncFileResourceRefCntRequest, opts ...grpc.CallOption) (*catalogpb.IncFileResourceRefCntResponse, error) {
 	var out *catalogpb.IncFileResourceRefCntResponse
-	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
+	err := rc.router.DoNonIdempotent(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.IncFileResourceRefCnt(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
 
+// DecFileResourceRefCnt applies a -1 ref-count delta; see IncFileResourceRefCnt for why it must
+// not be blindly retried. RecoverFileResourceRefCnt is left on Do: it rebuilds counts from an
+// absolute snapshot, so re-sending it is idempotent.
 func (rc *routingClient) DecFileResourceRefCnt(ctx context.Context, in *catalogpb.DecFileResourceRefCntRequest, opts ...grpc.CallOption) (*catalogpb.DecFileResourceRefCntResponse, error) {
 	var out *catalogpb.DecFileResourceRefCntResponse
-	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
+	err := rc.router.DoNonIdempotent(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DecFileResourceRefCnt(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -819,7 +838,7 @@ func (rc *routingClient) RecoverFileResourceRefCnt(ctx context.Context, in *cata
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.RecoverFileResourceRefCnt(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -829,7 +848,7 @@ func (rc *routingClient) BulkImport(ctx context.Context, in *catalogpb.BulkImpor
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.BulkImport(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -839,7 +858,7 @@ func (rc *routingClient) VerifyImport(ctx context.Context, in *catalogpb.VerifyI
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.VerifyImport(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -849,7 +868,7 @@ func (rc *routingClient) GetRouteMap(ctx context.Context, in *catalogpb.GetRoute
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.GetRouteMap(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
@@ -859,7 +878,7 @@ func (rc *routingClient) DeleteNamespace(ctx context.Context, in *catalogpb.Dele
 	err := rc.router.Do(ctx, rc.namespace, func(c context.Context, cli catalogpb.CatalogServiceClient) error {
 		var e error
 		out, e = cli.DeleteNamespace(c, in, opts...)
-		return e
+		return callErr(e, out.GetStatus())
 	})
 	return out, err
 }
