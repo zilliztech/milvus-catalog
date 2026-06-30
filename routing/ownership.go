@@ -37,13 +37,17 @@ func ClaimShard(ctx context.Context, cli *clientv3.Client, prefix string, shard 
 	return true, resp.Header.Revision, nil
 }
 
-// OwnerInfo is a shard's current owner and its claim term (the ownership key's ModRevision).
+// OwnerInfo is a shard's current owner, its claim term (the ownership key's ModRevision), and
+// the lease the key is bound to (so a node can tell when it owns a shard whose key still rides a
+// previous incarnation's lease and must be re-bound).
 type OwnerInfo struct {
 	Owner string
 	Term  int64
+	Lease clientv3.LeaseID
 }
 
-// LoadOwnershipMap reads the full shard -> {owner, term} map. Unowned shards are zero-valued.
+// LoadOwnershipMap reads the full shard -> {owner, term, lease} map. Unowned shards are
+// zero-valued.
 func LoadOwnershipMap(ctx context.Context, cli *clientv3.Client, prefix string) ([ShardCount]OwnerInfo, error) {
 	var om [ShardCount]OwnerInfo
 	base := path.Join(prefix, "ownership", "shard") + "/"
@@ -56,9 +60,29 @@ func LoadOwnershipMap(ctx context.Context, cli *clientv3.Client, prefix string) 
 		if err != nil || s < 0 || s >= ShardCount {
 			continue
 		}
-		om[s] = OwnerInfo{Owner: string(kv.Value), Term: kv.ModRevision}
+		om[s] = OwnerInfo{Owner: string(kv.Value), Term: kv.ModRevision, Lease: clientv3.LeaseID(kv.Lease)}
 	}
 	return om, nil
+}
+
+// RebindShard re-binds an ownership key this node already owns to a (new) lease, leaving the
+// owner unchanged. It is used when a node adopts a shard whose key is still tied to a previous
+// incarnation's lease (e.g. a same-id fast restart): without this the key would evaporate when
+// the stale lease expires while the node still serves the shard. CAS on value==nodeID so it
+// never rebinds a key another node now owns. Returns the new term.
+func RebindShard(ctx context.Context, cli *clientv3.Client, prefix string, shard int, nodeID string, lease clientv3.LeaseID) (bool, int64, error) {
+	key := shardKey(prefix, shard)
+	resp, err := cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.Value(key), "=", nodeID)).
+		Then(clientv3.OpPut(key, nodeID, clientv3.WithLease(lease))).
+		Commit()
+	if err != nil {
+		return false, 0, err
+	}
+	if !resp.Succeeded {
+		return false, 0, nil
+	}
+	return true, resp.Header.Revision, nil
 }
 
 // ReleaseShard deletes the ownership key only if nodeID still owns it (CAS on value), so a

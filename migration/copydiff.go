@@ -74,15 +74,32 @@ func loadLogical(ctx context.Context, m kv.MetaKv, root string) (map[string]stri
 // stripRootPath turns a full backend key into its logical key by removing the instance
 // rootPath. The full key is rootPath + "/" + logicalKey and logicalKey starts with root, so
 // we locate root at a path-segment boundary and slice from there.
+//
+// The match must be anchored at a segment boundary: a plain substring search for "/"+root would
+// also fire inside a longer segment that merely begins with root (e.g. root="kv" hitting a
+// "kv-store" segment), anchoring the strip at the wrong "/" and rewriting the key incorrectly —
+// and because DiffPrefixes strips src and dst the same way, the verifier would compare two
+// identically-wrong keys and report no mismatch. So we only accept "/"+root when it is followed
+// by "/" or ends the key. (This still assumes the rootPath does not itself contain root as a
+// full segment; a fully unambiguous strip would need the backend rootPath passed in explicitly.)
 func stripRootPath(fullKey, root string) (string, error) {
 	// Prefer the rootPath case: root appears preceded by "/" (fullKey = rootPath + "/" + root/...).
 	// Check this BEFORE the empty-rootPath fast path so a non-empty rootPath whose key already
 	// starts with root is still stripped correctly.
-	if idx := strings.Index(fullKey, "/"+root); idx >= 0 {
-		return fullKey[idx+1:], nil
+	needle := "/" + root
+	for from := 0; ; {
+		i := strings.Index(fullKey[from:], needle)
+		if i < 0 {
+			break
+		}
+		idx := from + i
+		if after := idx + len(needle); after == len(fullKey) || fullKey[after] == '/' {
+			return fullKey[idx+1:], nil
+		}
+		from = idx + 1
 	}
-	// Empty-rootPath instance: the full key already IS the logical key.
-	if strings.HasPrefix(fullKey, root) {
+	// Empty-rootPath instance: the full key already IS the logical key (root at a segment boundary).
+	if fullKey == root || strings.HasPrefix(fullKey, root+"/") {
 		return fullKey, nil
 	}
 	return "", merr.WrapErrParameterInvalidMsg(

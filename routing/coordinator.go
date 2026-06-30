@@ -122,6 +122,31 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 		log.Ctx(ctx).Warn("catalog reconcile: load ownership map failed", zap.String("node", c.nodeID), zap.Error(err))
 		return
 	}
+
+	// Re-bind any shard we own whose ownership key still rides a previous incarnation's lease
+	// (a same-id fast restart adopts such a shard without re-claiming it, since Reconcile treats
+	// actual==me && suggested==me as a no-op). Left alone, that key evaporates when the stale
+	// lease expires while we still serve the shard — a split-brain window if rendezvous has since
+	// moved the shard elsewhere. CAS on value==nodeID keeps it safe; the term bumps once here and
+	// is picked up on the next load. Shards we just claimed already ride the current lease, and
+	// shards we are releasing are skipped.
+	lease := c.membership.LeaseID()
+	releaseSet := make(map[int]struct{}, len(release))
+	for _, s := range release {
+		releaseSet[s] = struct{}{}
+	}
+	for s := 0; s < ShardCount; s++ {
+		if om[s].Owner != c.nodeID || om[s].Lease == lease {
+			continue
+		}
+		if _, skip := releaseSet[s]; skip {
+			continue
+		}
+		if _, _, err := RebindShard(cctx, c.cli, c.prefix, s, c.nodeID, lease); err != nil {
+			log.Ctx(ctx).Warn("catalog reconcile: rebind shard to current lease failed", zap.String("node", c.nodeID), zap.Int("shard", s), zap.Error(err))
+		}
+	}
+
 	owned := make(map[int]int64)
 	for s := 0; s < ShardCount; s++ {
 		if om[s].Owner == c.nodeID {
