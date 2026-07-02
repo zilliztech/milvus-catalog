@@ -92,6 +92,8 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 	cctx, cancel := context.WithTimeout(ctx, c.reconcileTimeout)
 	defer cancel()
 
+	reconcileRounds.WithLabelValues(c.nodeID).Inc()
+
 	members, err := ListMembers(cctx, c.cli, c.prefix)
 	if err != nil {
 		log.Ctx(ctx).Warn("catalog reconcile: list members failed", zap.String("node", c.nodeID), zap.Error(err))
@@ -104,8 +106,10 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 	}
 	claim, release := Reconcile(c.nodeID, members, sm)
 	for _, s := range claim {
-		if _, _, err := ClaimShard(cctx, c.cli, c.prefix, s, c.nodeID, c.membership.LeaseID()); err != nil {
+		if ok, _, err := ClaimShard(cctx, c.cli, c.prefix, s, c.nodeID, c.membership.LeaseID()); err != nil {
 			log.Ctx(ctx).Warn("catalog reconcile: claim shard failed", zap.String("node", c.nodeID), zap.Int("shard", s), zap.Error(err))
+		} else if ok {
+			ownershipChanges.WithLabelValues(c.nodeID, "claim").Inc()
 		}
 	}
 	for _, s := range release {
@@ -113,6 +117,8 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 		c.MarkReleasing(s)
 		if err := ReleaseShard(cctx, c.cli, c.prefix, s, c.nodeID); err != nil {
 			log.Ctx(ctx).Warn("catalog reconcile: release shard failed", zap.String("node", c.nodeID), zap.Int("shard", s), zap.Error(err))
+		} else {
+			ownershipChanges.WithLabelValues(c.nodeID, "release").Inc()
 		}
 	}
 
@@ -166,6 +172,8 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 	c.owned = owned
 	c.releasing = releasing
 	c.mu.Unlock()
+
+	ownedShards.WithLabelValues(c.nodeID).Set(float64(len(owned)))
 }
 
 // Fatal returns a channel closed when the membership lease is irrecoverably lost (etcd dropped
@@ -194,6 +202,9 @@ func (c *Coordinator) IsServable(namespace string) bool {
 	_, own := c.owned[shard]
 	_, rel := c.releasing[shard]
 	c.mu.Unlock()
+	if !own {
+		notOwnerRejections.WithLabelValues(c.nodeID).Inc()
+	}
 	return own && !rel && c.membership.Fresh(c.leaseWindow)
 }
 
