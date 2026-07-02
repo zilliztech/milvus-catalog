@@ -65,7 +65,11 @@ func JoinMembership(ctx context.Context, cli *clientv3.Client, prefix, nodeID st
 	// record each successful keepalive so Fresh() reflects live etcd connectivity.
 	go func() {
 		for range ka {
-			m.lastKeepAlive.Store(time.Now().UnixNano())
+			now := time.Now().UnixNano()
+			prev := m.lastKeepAlive.Swap(now)
+			if prev != 0 {
+				leaseKeepAliveInterval.WithLabelValues(m.nodeID).Observe(time.Duration(now - prev).Seconds())
+			}
 		}
 		// The keepalive channel closed. If this wasn't a deliberate Close/simulateCrash, the lease
 		// was lost (e.g. an etcd partition longer than the TTL) and nothing re-establishes it —
