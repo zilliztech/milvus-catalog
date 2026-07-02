@@ -32,6 +32,13 @@ type Coordinator struct {
 	owned     map[int]int64    // shard -> term (claim ModRevision)
 	releasing map[int]struct{} // shards being gracefully handed off; reject new requests
 
+	// inflight is a per-shard barrier for graceful handoff: an in-flight request holds the
+	// shard's read-lock for its lifetime (see Begin), and drainShard takes the write-lock to
+	// wait for those requests to finish before the ownership key is deleted. A [ShardCount]
+	// array of RWMutex is inlined here; Coordinator is only ever used by pointer so the
+	// non-copyable mutexes are never copied.
+	inflight [ShardCount]sync.RWMutex
+
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -109,8 +116,12 @@ func (c *Coordinator) reconcileOnce(ctx context.Context) {
 		}
 	}
 	for _, s := range release {
-		// graceful handoff: stop serving new requests for the shard, then release the key.
+		// graceful handoff: close the gate to new requests, drain the in-flight ones, then
+		// release the key. drainShard blocks until every request that entered before the gate
+		// closed has finished, so we never delete an ownership key out from under a live request
+		// (and the shard's next owner never races a straggler write from us).
 		c.MarkReleasing(s)
+		c.drainShard(s)
 		if err := ReleaseShard(cctx, c.cli, c.prefix, s, c.nodeID); err != nil {
 			log.Ctx(ctx).Warn("catalog reconcile: release shard failed", zap.String("node", c.nodeID), zap.Int("shard", s), zap.Error(err))
 		}
@@ -234,6 +245,19 @@ func (c *Coordinator) simulateCrash() {
 	if c.membership != nil {
 		c.membership.simulateCrash()
 	}
+}
+
+// ShadowShards returns the shards this node is the warm shadow (rendezvous second-highest
+// weight) for, given the current live membership — i.e. the shards it would inherit if their
+// present owner failed. A node preheats these (preloads their namespaces' state) so failover
+// is warm instead of a cold reload. Reads live membership from the pooled etcd; the placement
+// math itself is the pure ShadowShards below.
+func (c *Coordinator) ShadowShards(ctx context.Context) ([]int, error) {
+	members, err := ListMembers(ctx, c.cli, c.prefix)
+	if err != nil {
+		return nil, err
+	}
+	return ShadowShards(c.nodeID, members), nil
 }
 
 // OwnerOf resolves which node owns a namespace's shard — the discovery primitive a client

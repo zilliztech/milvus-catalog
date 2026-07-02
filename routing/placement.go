@@ -34,6 +34,45 @@ func Rendezvous(shard int, members []string) string {
 	return best
 }
 
+// RendezvousTop2 returns the two highest-weight members for a shard: the primary owner and the
+// warm shadow (second highest). The shadow is exactly the member rendezvous re-homes the shard
+// to when the primary leaves (removing the primary makes the second-highest the new highest),
+// so a node that preheats the shards it shadows preloads precisely what it will inherit on
+// failover. Returns ("", "") when there are no members and (primary, "") for a single member.
+//
+// primary always equals Rendezvous(shard, members): both rank by the same weight.
+func RendezvousTop2(shard int, members []string) (primary, shadow string) {
+	var pScore, sScore uint64
+	for _, m := range members {
+		score := weight(m, shard)
+		switch {
+		case primary == "" || score > pScore:
+			shadow, sScore = primary, pScore // old primary slides down to shadow
+			primary, pScore = m, score
+		case shadow == "" || score > sScore:
+			shadow, sScore = m, score
+		}
+	}
+	return primary, shadow
+}
+
+// ShadowShards returns the shards for which me is the warm shadow (rendezvous second-highest
+// weight) — the shards this node would inherit if their current primary failed, and therefore
+// the set to preheat for fast failover. Returns nil when there are fewer than two members (a
+// single member owns everything with nothing to shadow).
+func ShadowShards(me string, members []string) []int {
+	if len(members) < 2 {
+		return nil
+	}
+	var out []int
+	for s := 0; s < ShardCount; s++ {
+		if _, shadow := RendezvousTop2(s, members); shadow == me {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func weight(member string, shard int) uint64 {
 	d := xxhash.New()
 	_, _ = d.WriteString(member)
